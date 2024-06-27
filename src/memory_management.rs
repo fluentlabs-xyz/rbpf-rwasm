@@ -13,6 +13,9 @@ extern crate libc;
 #[cfg(not(target_os = "windows"))]
 use libc::c_void;
 
+use alloc::vec;
+use alloc::format;
+
 #[cfg(target_os = "windows")]
 use winapi::{
     ctypes::c_void,
@@ -94,7 +97,7 @@ pub fn round_to_page_size(value: usize, page_size: usize) -> usize {
 }
 
 pub unsafe fn allocate_pages(size_in_bytes: usize) -> Result<*mut u8, EbpfError> {
-    let mut raw: *mut c_void = std::ptr::null_mut();
+    let mut raw: *mut c_void = core::ptr::null_mut();
     #[cfg(not(target_os = "windows"))]
     libc_error_guard!(
         mmap,

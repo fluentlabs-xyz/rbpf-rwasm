@@ -7,6 +7,8 @@
 
 //! This module translates eBPF assembly language to binary.
 
+use alloc::format;
+use alloc::string::{String, ToString};
 use self::InstructionType::{
     AluBinary, AluUnary, CallImm, CallReg, Endian, JumpConditional, JumpUnconditional, LoadAbs,
     LoadDwImm, LoadInd, LoadReg, NoOperand, StoreImm, StoreReg, Syscall,
@@ -22,7 +24,9 @@ use crate::{
     program::{BuiltinProgram, FunctionRegistry, SBPFVersion},
     vm::ContextObject,
 };
-use std::{collections::HashMap, sync::Arc};
+use hashbrown::HashMap;
+use alloc::sync::Arc;
+use alloc::vec::Vec;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum InstructionType {

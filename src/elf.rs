@@ -6,6 +6,9 @@
 // where the section headers may be removed from the ELF.  If that happens then
 // this loader will need to be re-written to use the program headers instead.
 
+extern crate alloc;
+
+use alloc::{format, vec};
 use crate::{
     aligned_memory::{is_memory_aligned, AlignedMemory},
     ebpf::{self, EF_SBPF_V2, HOST_ALIGN, INSN_SIZE},
@@ -30,81 +33,192 @@ use crate::{
 #[cfg(all(feature = "jit", not(target_os = "windows"), target_arch = "x86_64"))]
 use crate::jit::{JitCompiler, JitProgram};
 use byteorder::{ByteOrder, LittleEndian};
-use std::{collections::BTreeMap, fmt::Debug, mem, ops::Range, str, sync::Arc};
+use core::{fmt, fmt::Debug, mem, ops::Range, str};
+use alloc::sync::Arc;
+use alloc::collections::BTreeMap;
+use alloc::string::{String, ToString};
+use alloc::vec::Vec;
+use core::fmt::Display;
+use combine::lib::println;
+use crate::verifier::VerifierError;
+
+impl From<VerifierError> for EbpfError {
+    fn from(error: VerifierError) -> Self {
+        EbpfError::VerifierError(error)
+    }
+}
 
 /// Error definitions
-#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+#[derive(PartialEq, Eq)]
 pub enum ElfError {
     /// Failed to parse ELF file
-    #[error("Failed to parse ELF file: {0}")]
+    // #[error("Failed to parse ELF file: {0}")]
     FailedToParse(String),
     /// Entrypoint out of bounds
-    #[error("Entrypoint out of bounds")]
+    // #[error("Entrypoint out of bounds")]
     EntrypointOutOfBounds,
     /// Invaid entrypoint
-    #[error("Invaid entrypoint")]
+    // #[error("Invaid entrypoint")]
     InvalidEntrypoint,
     /// Failed to get section
-    #[error("Failed to get section {0}")]
+    // #[error("Failed to get section {0}")]
     FailedToGetSection(String),
     /// Unresolved symbol
-    #[error("Unresolved symbol ({0}) at instruction #{1:?} (ELF file offset {2:#x})")]
+    // #[error("Unresolved symbol ({0}) at instruction #{1:?} (ELF file offset {2:#x})")]
     UnresolvedSymbol(String, usize, usize),
     /// Section not found
-    #[error("Section not found: {0}")]
+    // #[error("Section not found: {0}")]
     SectionNotFound(String),
     /// Relative jump out of bounds
-    #[error("Relative jump out of bounds at instruction #{0}")]
+    // #[error("Relative jump out of bounds at instruction #{0}")]
     RelativeJumpOutOfBounds(usize),
     /// Symbol hash collision
-    #[error("Symbol hash collision {0:#x}")]
+    // #[error("Symbol hash collision {0:#x}")]
     SymbolHashCollision(u32),
     /// Incompatible ELF: wrong endianess
-    #[error("Incompatible ELF: wrong endianess")]
+    // #[error("Incompatible ELF: wrong endianess")]
     WrongEndianess,
     /// Incompatible ELF: wrong ABI
-    #[error("Incompatible ELF: wrong ABI")]
+    // #[error("Incompatible ELF: wrong ABI")]
     WrongAbi,
     /// Incompatible ELF: wrong mchine
-    #[error("Incompatible ELF: wrong machine")]
+    // #[error("Incompatible ELF: wrong machine")]
     WrongMachine,
     /// Incompatible ELF: wrong class
-    #[error("Incompatible ELF: wrong class")]
+    // #[error("Incompatible ELF: wrong class")]
     WrongClass,
     /// Not one text section
-    #[error("Multiple or no text sections, consider removing llc option: -function-sections")]
+    // #[error("Multiple or no text sections, consider removing llc option: -function-sections")]
     NotOneTextSection,
     /// Read-write data not supported
-    #[error("Found writable section ({0}) in ELF, read-write data not supported")]
+    // #[error("Found writable section ({0}) in ELF, read-write data not supported")]
     WritableSectionNotSupported(String),
     /// Relocation failed, no loadable section contains virtual address
-    #[error("Relocation failed, no loadable section contains virtual address {0:#x}")]
+    // #[error("Relocation failed, no loadable section contains virtual address {0:#x}")]
     AddressOutsideLoadableSection(u64),
     /// Relocation failed, invalid referenced virtual address
-    #[error("Relocation failed, invalid referenced virtual address {0:#x}")]
+    // #[error("Relocation failed, invalid referenced virtual address {0:#x}")]
     InvalidVirtualAddress(u64),
     /// Relocation failed, unknown type
-    #[error("Relocation failed, unknown type {0:?}")]
+    // #[error("Relocation failed, unknown type {0:?}")]
     UnknownRelocation(u32),
     /// Failed to read relocation info
-    #[error("Failed to read relocation info")]
+    // #[error("Failed to read relocation info")]
     FailedToReadRelocationInfo,
     /// Incompatible ELF: wrong type
-    #[error("Incompatible ELF: wrong type")]
+    // #[error("Incompatible ELF: wrong type")]
     WrongType,
     /// Unknown symbol
-    #[error("Unknown symbol with index {0}")]
+    // #[error("Unknown symbol with index {0}")]
     UnknownSymbol(usize),
     /// Offset or value is out of bounds
-    #[error("Offset or value is out of bounds")]
+    // #[error("Offset or value is out of bounds")]
     ValueOutOfBounds,
     /// Detected sbpf_version required by the executable which are not enabled
-    #[error("Detected sbpf_version required by the executable which are not enabled")]
+    // #[error("Detected sbpf_version required by the executable which are not enabled")]
     UnsupportedSBPFVersion,
     /// Invalid program header
-    #[error("Invalid ELF program header")]
+    // #[error("Invalid ELF program header")]
     InvalidProgramHeader,
 }
+
+impl fmt::Debug for ElfError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ElfError::FailedToParse(err) => f.debug_tuple("FailedToParse").field(err).finish(),
+            ElfError::EntrypointOutOfBounds => f.write_str("EntrypointOutOfBounds"),
+            ElfError::InvalidEntrypoint => f.write_str("InvalidEntrypoint"),
+            ElfError::FailedToGetSection(section) => f.debug_tuple("FailedToGetSection").field(section).finish(),
+            ElfError::UnresolvedSymbol(symbol, instruction, offset) => f.debug_tuple("UnresolvedSymbol")
+                .field(symbol)
+                .field(instruction)
+                .field(offset)
+                .finish(),
+            ElfError::SectionNotFound(section) => f.debug_tuple("SectionNotFound").field(section).finish(),
+            ElfError::RelativeJumpOutOfBounds(instruction) => f.debug_tuple("RelativeJumpOutOfBounds").field(instruction).finish(),
+            ElfError::SymbolHashCollision(hash) => f.debug_tuple("SymbolHashCollision").field(hash).finish(),
+            ElfError::WrongEndianess => f.write_str("WrongEndianess"),
+            ElfError::WrongAbi => f.write_str("WrongAbi"),
+            ElfError::WrongMachine => f.write_str("WrongMachine"),
+            ElfError::WrongClass => f.write_str("WrongClass"),
+            ElfError::NotOneTextSection => f.write_str("NotOneTextSection"),
+            ElfError::WritableSectionNotSupported(section) => f.debug_tuple("WritableSectionNotSupported").field(section).finish(),
+            ElfError::AddressOutsideLoadableSection(address) => f.debug_tuple("AddressOutsideLoadableSection").field(address).finish(),
+            ElfError::InvalidVirtualAddress(address) => f.debug_tuple("InvalidVirtualAddress").field(address).finish(),
+            ElfError::UnknownRelocation(relocation) => f.debug_tuple("UnknownRelocation").field(relocation).finish(),
+            ElfError::FailedToReadRelocationInfo => f.write_str("FailedToReadRelocationInfo"),
+            ElfError::WrongType => f.write_str("WrongType"),
+            ElfError::UnknownSymbol(index) => f.debug_tuple("UnknownSymbol").field(index).finish(),
+            ElfError::ValueOutOfBounds => f.write_str("ValueOutOfBounds"),
+            ElfError::UnsupportedSBPFVersion => f.write_str("UnsupportedSBPFVersion"),
+            ElfError::InvalidProgramHeader => f.write_str("InvalidProgramHeader"),
+        }
+    }
+}
+
+
+impl Display for ElfError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ElfError::FailedToParse(err) => write!(f, "Failed to parse ELF file: {}", err),
+            ElfError::EntrypointOutOfBounds => write!(f, "Entrypoint out of bounds"),
+            ElfError::InvalidEntrypoint => write!(f, "Invalid entrypoint"),
+            ElfError::FailedToGetSection(section) => write!(f, "Failed to get section {}", section),
+            ElfError::UnresolvedSymbol(symbol, instruction, offset) => write!(
+                f,
+                "Unresolved symbol ({}) at instruction #{:?} (ELF file offset {:#x})",
+                symbol, instruction, offset
+            ),
+            ElfError::SectionNotFound(section) => write!(f, "Section not found: {}", section),
+            ElfError::RelativeJumpOutOfBounds(instruction) => write!(
+                f,
+                "Relative jump out of bounds at instruction #{}",
+                instruction
+            ),
+            ElfError::SymbolHashCollision(hash) => write!(f, "Symbol hash collision {:#x}", hash),
+            ElfError::WrongEndianess => write!(f, "Incompatible ELF: wrong endianess"),
+            ElfError::WrongAbi => write!(f, "Incompatible ELF: wrong ABI"),
+            ElfError::WrongMachine => write!(f, "Incompatible ELF: wrong machine"),
+            ElfError::WrongClass => write!(f, "Incompatible ELF: wrong class"),
+            ElfError::NotOneTextSection => write!(
+                f,
+                "Multiple or no text sections, consider removing llc option: -function-sections"
+            ),
+            ElfError::WritableSectionNotSupported(section) => write!(
+                f,
+                "Found writable section ({}) in ELF, read-write data not supported",
+                section
+            ),
+            ElfError::AddressOutsideLoadableSection(address) => write!(
+                f,
+                "Relocation failed, no loadable section contains virtual address {:#x}",
+                address
+            ),
+            ElfError::InvalidVirtualAddress(address) => write!(
+                f,
+                "Relocation failed, invalid referenced virtual address {:#x}",
+                address
+            ),
+            ElfError::UnknownRelocation(relocation) => write!(
+                f,
+                "Relocation failed, unknown type {:#x}",
+                relocation
+            ),
+            ElfError::FailedToReadRelocationInfo => write!(f, "Failed to read relocation info"),
+            ElfError::WrongType => write!(f, "Incompatible ELF: wrong type"),
+            ElfError::UnknownSymbol(index) => write!(f, "Unknown symbol with index {}", index),
+            ElfError::ValueOutOfBounds => write!(f, "Offset or value is out of bounds"),
+            ElfError::UnsupportedSBPFVersion => write!(
+                f,
+                "Detected sbpf_version required by the executable which are not enabled"
+            ),
+            ElfError::InvalidProgramHeader => write!(f, "Invalid ELF program header"),
+        }
+    }
+}
+
+
+pub type ElfResult<T> = core::result::Result<T, ElfError>;
 
 // For more information on the BPF instruction set:
 // https://github.com/iovisor/bpf-docs/blob/master/eBPF.md
@@ -397,7 +511,7 @@ impl<C: ContextObject> Executable<C> {
         let text_section_info = SectionInfo {
             name: if config.enable_symbol_and_section_labels {
                 elf.section_name(text_section.sh_name())
-                    .and_then(|name| std::str::from_utf8(name).ok())
+                    .and_then(|name| str::from_utf8(name).ok())
                     .unwrap_or(".text")
                     .to_string()
             } else {

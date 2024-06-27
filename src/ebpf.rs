@@ -18,9 +18,10 @@
 //! <https://www.kernel.org/doc/Documentation/networking/filter.txt>, or for a shorter version of
 //! the list of the operation codes: <https://github.com/iovisor/bpf-docs/blob/master/eBPF.md>
 
+use alloc::vec::Vec;
 use byteorder::{ByteOrder, LittleEndian};
 use hash32::{Hash, Hasher, Murmur3Hasher};
-use std::fmt;
+use core::fmt;
 
 /// Solana BPF version flag
 pub const EF_SBPF_V2: u32 = 0x20;

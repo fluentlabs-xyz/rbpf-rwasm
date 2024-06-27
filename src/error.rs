@@ -6,75 +6,231 @@
 
 //! This module contains error and result types
 
+use alloc::boxed::Box;
+use alloc::string::{String, ToString};
+use alloc::vec::Vec;
+use core::fmt::{Debug, Display};
+use core::fmt::Write as FmtWrite;
 use {
     crate::{elf::ElfError, memory_region::AccessType, verifier::VerifierError},
-    std::error::Error,
+    core::fmt,
 };
 
+#[derive(Debug)]
+pub enum MemoryError {
+    InvalidInput,
+    WriteFailed,
+}
+
+impl fmt::Display for MemoryError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            MemoryError::InvalidInput => write!(f, "aligned memory fill_write failed"),
+            MemoryError::WriteFailed => write!(f, "aligned memory write failed"),
+        }
+    }
+}
+
+
+pub trait MyError: Debug + Display {
+    fn source(&self) -> Option<&(dyn MyError + 'static)> {
+        None
+    }
+}
+
+
+#[derive(Debug)]
+pub struct InvalidInputError {
+    message: String,
+}
+
+impl InvalidInputError {
+    pub fn new(message: String) -> Self {
+        Self { message }
+    }
+}
+
+impl Display for InvalidInputError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Invalid input: {}", self.message)
+    }
+}
+
+impl MyError for InvalidInputError {}
+
+
+#[derive(Debug)]
+pub struct WriteFailedError {
+    message: String,
+}
+
+impl WriteFailedError {
+    pub fn new(message: String) -> Self {
+        Self { message }
+    }
+}
+
+impl Display for WriteFailedError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Write operation failed: {}", self.message)
+    }
+}
+
+impl MyError for WriteFailedError {}
+#[derive(Debug)]
+pub struct CustomError {
+    description: String,
+}
+
+impl CustomError {
+    pub fn new(description: impl Into<String>) -> Self {
+        Self { description: description.into() }
+    }
+}
+
+#[derive(Debug)]
+pub struct SimpleError {
+    message: String,
+}
+
+impl Display for SimpleError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.message)
+    }
+}
+
+impl MyError for SimpleError {}
+
+
+impl fmt::Display for CustomError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.description)
+    }
+}
+
+
+impl MyError for CustomError {}
+
+impl From<fmt::Error> for CustomError {
+    fn from(_: fmt::Error) -> Self {
+        CustomError::new("write error")
+    }
+}
+
+#[derive(Debug)]
+pub struct FormatError {
+    message: String,
+}
+
+impl FormatError {
+    pub fn new(msg: String) -> Self {
+        FormatError { message: msg }
+    }
+}
+
+impl fmt::Display for FormatError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.message)
+    }
+}
+
+impl MyError for FormatError {}
+
+
+pub trait MyWrite: fmt::Write {
+    fn write(&mut self, buf: &[u8]) -> Result<usize, CustomError>;
+    fn flush(&mut self) -> Result<(), CustomError>;
+}
+
+impl From<fmt::Error> for Box<dyn MyError> {
+    fn from(err: fmt::Error) -> Self {
+        Box::new(FormatError::new(err.to_string()))
+    }
+}
+
+impl<T: FmtWrite> MyWrite for T {
+    fn write(&mut self, buf: &[u8]) -> Result<usize, CustomError> {
+        for &byte in buf {
+            self.write_char(byte as char).map_err(|_| CustomError::new("write error"))?;
+        }
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> Result<(), CustomError> {
+        Ok(())
+    }
+}
+
 /// Error definitions
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug)]
 #[repr(u64)] // discriminant size, used in emit_exception_kind in JIT
 pub enum EbpfError {
     /// ELF error
-    #[error("ELF error: {0}")]
-    ElfError(#[from] ElfError),
+    // #[error("ELF error: {0}")]
+    ElfError(ElfError),
     /// Function was already registered
-    #[error("function #{0} was already registered")]
+    // #[error("function #{0} was already registered")]
     FunctionAlreadyRegistered(usize),
     /// Exceeded max BPF to BPF call depth
-    #[error("exceeded max BPF to BPF call depth")]
+    // #[error("exceeded max BPF to BPF call depth")]
     CallDepthExceeded,
     /// Attempt to exit from root call frame
-    #[error("attempted to exit root call frame")]
+    // #[error("attempted to exit root call frame")]
     ExitRootCallFrame,
     /// Divide by zero"
-    #[error("divide by zero at BPF instruction")]
+    //#[error("divide by zero at BPF instruction")]
     DivideByZero,
     /// Divide overflow
-    #[error("division overflow at BPF instruction")]
+    //#[error("division overflow at BPF instruction")]
     DivideOverflow,
     /// Exceeded max instructions allowed
-    #[error("attempted to execute past the end of the text segment at BPF instruction")]
+    //#[error("attempted to execute past the end of the text segment at BPF instruction")]
     ExecutionOverrun,
     /// Attempt to call to an address outside the text segment
-    #[error("callx attempted to call outside of the text segment")]
+    //#[error("callx attempted to call outside of the text segment")]
     CallOutsideTextSegment,
     /// Exceeded max instructions allowed
-    #[error("exceeded CUs meter at BPF instruction")]
+    //#[error("exceeded CUs meter at BPF instruction")]
     ExceededMaxInstructions,
     /// Program has not been JIT-compiled
-    #[error("program has not been JIT-compiled")]
+    //#[error("program has not been JIT-compiled")]
     JitNotCompiled,
     /// Invalid virtual address
-    #[error("invalid virtual address {0:x?}")]
+    //#[error("invalid virtual address {0:x?}")]
     InvalidVirtualAddress(u64),
     /// Memory region index or virtual address space is invalid
-    #[error("Invalid memory region at index {0}")]
+    //#[error("Invalid memory region at index {0}")]
     InvalidMemoryRegion(usize),
     /// Access violation (general)
-    #[error("Access violation in {3} section at address {1:#x} of size {2:?}")]
+    //#[error("Access violation in {3} section at address {1:#x} of size {2:?}")]
     AccessViolation(AccessType, u64, u64, &'static str),
     /// Access violation (stack specific)
-    #[error("Access violation in stack frame {3} at address {1:#x} of size {2:?}")]
+    //#[error("Access violation in stack frame {3} at address {1:#x} of size {2:?}")]
     StackAccessViolation(AccessType, u64, u64, i64),
     /// Invalid instruction
-    #[error("invalid BPF instruction")]
+    //#[error("invalid BPF instruction")]
     InvalidInstruction,
     /// Unsupported instruction
-    #[error("unsupported BPF instruction")]
+    //#[error("unsupported BPF instruction")]
     UnsupportedInstruction,
     /// Compilation is too big to fit
-    #[error("Compilation exhausted text segment at BPF instruction {0}")]
+    //#[error("Compilation exhausted text segment at BPF instruction {0}")]
     ExhaustedTextSegment(usize),
     /// Libc function call returned an error
-    #[error("Libc calling {0} {1:?} returned error code {2}")]
+    //#[error("Libc calling {0} {1:?} returned error code {2}")]
     LibcInvocationFailed(&'static str, Vec<String>, i32),
     /// Verifier error
-    #[error("Verifier error: {0}")]
-    VerifierError(#[from] VerifierError),
+    //#[error("Verifier error: {0}")]
+    VerifierError(VerifierError),
     /// Syscall error
-    #[error("Syscall error: {0}")]
-    SyscallError(Box<dyn Error>),
+    //#[error("Syscall error: {0}")]
+    SyscallError(Box<dyn MyError>),
+}
+
+impl From<ElfError> for EbpfError {
+    fn from(error: ElfError) -> Self {
+        EbpfError::ElfError(error)
+    }
 }
 
 /// Same as `Result` but provides a stable memory layout
@@ -87,7 +243,7 @@ pub enum StableResult<T, E> {
     Err(E),
 }
 
-impl<T: std::fmt::Debug, E: std::fmt::Debug> StableResult<T, E> {
+impl<T: fmt::Debug, E: fmt::Debug> StableResult<T, E> {
     /// `true` if `Ok`
     pub fn is_ok(&self) -> bool {
         match self {
@@ -145,7 +301,7 @@ impl<T: std::fmt::Debug, E: std::fmt::Debug> StableResult<T, E> {
         allow(dead_code)
     )]
     pub(crate) fn discriminant(&self) -> u64 {
-        unsafe { *std::ptr::addr_of!(*self).cast::<u64>() }
+        unsafe { *core::ptr::addr_of!(*self).cast::<u64>() }
     }
 }
 
@@ -180,5 +336,25 @@ mod tests {
         assert_eq!(ok.discriminant(), 0);
         let err = ProgramResult::Err(EbpfError::JitNotCompiled);
         assert_eq!(err.discriminant(), 1);
+    }
+}
+
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_error_display() {
+        let error = CustomError::new("test error");
+        assert_eq!(format!("{}", error), "test error");
+    }
+
+    #[test]
+    fn test_error_from_fmt() {
+        let fmt_error = fmt::Error;
+        let error: Box<dyn MyError> = fmt_error.into();
+        assert_eq!(format!("{}", error), "Formatting error occurred");
     }
 }

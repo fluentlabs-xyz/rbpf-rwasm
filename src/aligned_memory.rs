@@ -1,6 +1,67 @@
 //! Aligned memory
 
-use std::{mem, ptr};
+use alloc::{vec};
+use alloc::boxed::Box;
+use alloc::vec::Vec;
+use core::{mem, ptr};
+use crate::error::MyError;
+
+pub struct MyStruct {
+    mem: Vec<u8>,
+    align_offset: usize,
+    max_len: usize,
+    zero_up_to_max_len: bool,
+}
+
+#[derive(Debug)]
+pub struct InvalidInputError;
+
+impl MyError for InvalidInputError {
+    // fn description(&self) -> &str {
+    //     "Invalid input provided"
+    // }
+}
+
+impl core::fmt::Display for InvalidInputError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "Invalid input provided")
+    }
+}
+
+#[derive(Debug)]
+pub struct WriteFailedError;
+
+impl MyError for WriteFailedError {}
+
+impl core::fmt::Display for WriteFailedError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "Write operation failed")
+    }
+}
+
+impl MyStruct {
+    pub fn fill_write(&mut self, num: usize, value: u8) -> Result<(), Box<dyn MyError>> {
+        let new_len = match (
+            self.mem.len().checked_add(num),
+            self.align_offset.checked_add(self.max_len),
+        ) {
+            (Some(new_len), Some(allocation_end)) if new_len <= allocation_end => new_len,
+            _ => {
+                return Err(Box::new(InvalidInputError));
+            }
+        };
+        if self.zero_up_to_max_len && value == 0 {
+            // Safe because everything up to `max_len` is zeroed and no shrinking is allowed
+            unsafe {
+                self.mem.set_len(new_len);
+            }
+        } else {
+            self.mem.resize(new_len, value);
+        }
+        Ok(())
+    }
+}
+
 
 /// Scalar types, aka "plain old data"
 pub trait Pod {}
@@ -111,18 +172,17 @@ impl<const ALIGN: usize> AlignedMemory<ALIGN> {
         let end = self.mem.len();
         &mut self.mem[start..end]
     }
+
+
     /// Grows memory with `value` repeated `num` times starting at the `write_index`
-    pub fn fill_write(&mut self, num: usize, value: u8) -> std::io::Result<()> {
+    pub fn fill_write(&mut self, num: usize, value: u8) -> Result<(), Box<dyn MyError>> {
         let new_len = match (
             self.mem.len().checked_add(num),
             self.align_offset.checked_add(self.max_len),
         ) {
             (Some(new_len), Some(allocation_end)) if new_len <= allocation_end => new_len,
             _ => {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidInput,
-                    "aligned memory fill_write failed",
-                ))
+                return Err(Box::new(InvalidInputError));
             }
         };
         if self.zero_up_to_max_len && value == 0 {
@@ -177,24 +237,27 @@ impl<const ALIGN: usize> Clone for AlignedMemory<ALIGN> {
     }
 }
 
-impl<const ALIGN: usize> std::io::Write for AlignedMemory<ALIGN> {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+pub trait Write {
+    fn write(&mut self, buf: &[u8]) -> Result<usize, Box<dyn MyError>>;
+    fn flush(&mut self) -> Result<(), Box<dyn MyError>>;
+}
+
+impl<const ALIGN: usize> Write for AlignedMemory<ALIGN> {
+    fn write(&mut self, buf: &[u8]) -> Result<usize, Box<dyn MyError>> {
         match (
             self.mem.len().checked_add(buf.len()),
             self.align_offset.checked_add(self.max_len),
         ) {
             (Some(new_len), Some(allocation_end)) if new_len <= allocation_end => {}
             _ => {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidInput,
-                    "aligned memory write failed",
-                ))
+                return Err(Box::new(WriteFailedError));
             }
         }
         self.mem.extend_from_slice(buf);
         Ok(buf.len())
     }
-    fn flush(&mut self) -> std::io::Result<()> {
+
+    fn flush(&mut self) -> Result<(), Box<dyn MyError>> {
         Ok(())
     }
 }
@@ -215,7 +278,7 @@ pub fn is_memory_aligned(ptr: usize, align: usize) -> bool {
 #[allow(clippy::arithmetic_side_effects)]
 #[cfg(test)]
 mod tests {
-    use {super::*, std::io::Write};
+    use {std::io::Write, super::*};
 
     fn do_test<const ALIGN: usize>() {
         let mut aligned_memory = AlignedMemory::<ALIGN>::with_capacity(10);

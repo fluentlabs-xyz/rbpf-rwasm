@@ -11,7 +11,7 @@ use solana_rbpf::{
     static_analysis::Analysis,
     vm::TestContextObject,
 };
-use std::sync::Arc;
+use alloc::sync::Arc;
 
 // Simply disassemble a program into human-readable instructions.
 fn main() {

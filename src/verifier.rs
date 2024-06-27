@@ -28,63 +28,99 @@ use crate::{
     program::{FunctionRegistry, SBPFVersion},
     vm::Config,
 };
-use thiserror::Error;
+// use thiserror::Error;
+
+use core::fmt;
 
 /// Error definitions
-#[derive(Debug, Error, Eq, PartialEq)]
+#[derive(Eq, PartialEq)]
 pub enum VerifierError {
     /// ProgramLengthNotMultiple
-    #[error("program length must be a multiple of {} octets", ebpf::INSN_SIZE)]
+    // #[error("program length must be a multiple of {} octets", ebpf::INSN_SIZE)]
     ProgramLengthNotMultiple,
     /// Deprecated
-    #[error("Deprecated")]
+    // #[error("Deprecated")]
     ProgramTooLarge(usize),
     /// NoProgram
-    #[error("no program set, call prog_set() to load one")]
+    // #[error("no program set, call prog_set() to load one")]
     NoProgram,
     /// Division by zero
-    #[error("division by 0 (insn #{0})")]
+    // #[error("division by 0 (insn #{0})")]
     DivisionByZero(usize),
     /// UnsupportedLEBEArgument
-    #[error("unsupported argument for LE/BE (insn #{0})")]
+    // #[error("unsupported argument for LE/BE (insn #{0})")]
     UnsupportedLEBEArgument(usize),
     /// LDDWCannotBeLast
-    #[error("LD_DW instruction cannot be last in program")]
+    // #[error("LD_DW instruction cannot be last in program")]
     LDDWCannotBeLast,
     /// IncompleteLDDW
-    #[error("incomplete LD_DW instruction (insn #{0})")]
+    // #[error("incomplete LD_DW instruction (insn #{0})")]
     IncompleteLDDW(usize),
     /// InfiniteLoop
-    #[error("infinite loop (insn #{0})")]
+    // #[error("infinite loop (insn #{0})")]
     InfiniteLoop(usize),
     /// JumpOutOfCode
-    #[error("jump out of code to #{0} (insn #{1})")]
+    // #[error("jump out of code to #{0} (insn #{1})")]
     JumpOutOfCode(usize, usize),
     /// JumpToMiddleOfLDDW
-    #[error("jump to middle of LD_DW at #{0} (insn #{1})")]
+    // #[error("jump to middle of LD_DW at #{0} (insn #{1})")]
     JumpToMiddleOfLDDW(usize, usize),
     /// InvalidSourceRegister
-    #[error("invalid source register (insn #{0})")]
+    // #[error("invalid source register (insn #{0})")]
     InvalidSourceRegister(usize),
     /// CannotWriteR10
-    #[error("cannot write into register r10 (insn #{0})")]
+    // #[error("cannot write into register r10 (insn #{0})")]
     CannotWriteR10(usize),
     /// InvalidDestinationRegister
-    #[error("invalid destination register (insn #{0})")]
+    // #[error("invalid destination register (insn #{0})")]
     InvalidDestinationRegister(usize),
     /// UnknownOpCode
-    #[error("unknown eBPF opcode {0:#2x} (insn #{1:?})")]
+    // #[error("unknown eBPF opcode {0:#2x} (insn #{1:?})")]
     UnknownOpCode(u8, usize),
     /// Shift with overflow
-    #[error("Shift with overflow of {0}-bit value by {1} (insn #{2:?})")]
+    // #[error("Shift with overflow of {0}-bit value by {1} (insn #{2:?})")]
     ShiftWithOverflow(u64, u64, usize),
     /// Invalid register specified
-    #[error("Invalid register specified at instruction {0}")]
+    // #[error("Invalid register specified at instruction {0}")]
     InvalidRegister(usize),
     /// Invalid function
-    #[error("Invalid function at instruction {0}")]
+    // #[error("Invalid function at instruction {0}")]
     InvalidFunction(usize),
 }
+
+impl fmt::Display for VerifierError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            VerifierError::ProgramLengthNotMultiple => write!(f, "program length must be a multiple of octets"),
+            VerifierError::ProgramTooLarge(size) => write!(f, "program too large: {}", size),
+            VerifierError::NoProgram => write!(f, "no program set, call prog_set() to load one"),
+            VerifierError::DivisionByZero(insn) => write!(f, "division by 0 at instruction {}", insn),
+            VerifierError::UnsupportedLEBEArgument(insn) => write!(f, "unsupported argument for LE/BE at instruction {}", insn),
+            VerifierError::LDDWCannotBeLast => write!(f, "LD_DW instruction cannot be last in program"),
+            VerifierError::IncompleteLDDW(insn) => write!(f, "incomplete LD_DW instruction at {}", insn),
+            VerifierError::InfiniteLoop(insn) => write!(f, "infinite loop at instruction {}", insn),
+            VerifierError::JumpOutOfCode(addr, insn) => write!(f, "jump out of code to {} at instruction {}", addr, insn),
+            VerifierError::JumpToMiddleOfLDDW(addr, insn) => write!(f, "jump to middle of LD_DW at {} at instruction {}", addr, insn),
+            VerifierError::InvalidSourceRegister(insn) => write!(f, "invalid source register at instruction {}", insn),
+            VerifierError::CannotWriteR10(insn) => write!(f, "cannot write into register r10 at instruction {}", insn),
+            VerifierError::InvalidDestinationRegister(insn) => write!(f, "invalid destination register at instruction {}", insn),
+            VerifierError::UnknownOpCode(opc, insn) => write!(f, "unknown eBPF opcode {:#2x} at instruction {}", opc, insn),
+            VerifierError::ShiftWithOverflow(val, by, insn) => write!(f, "shift with overflow of {}-bit value by {} at instruction {}", val, by, insn),
+            VerifierError::InvalidRegister(insn) => write!(f, "invalid register specified at instruction {}", insn),
+            VerifierError::InvalidFunction(insn) => write!(f, "invalid function at instruction {}", insn),
+        }
+    }
+}
+
+impl core::fmt::Debug for VerifierError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self)
+    }
+}
+
+#[cfg(feature = "std")]
+impl std::error::Error for VerifierError {}
+
 
 /// eBPF Verifier
 pub trait Verifier {
@@ -143,7 +179,7 @@ fn check_load_dw(prog: &[u8], insn_ptr: usize) -> Result<(), VerifierError> {
 fn check_jmp_offset(
     prog: &[u8],
     insn_ptr: usize,
-    function_range: &std::ops::Range<usize>,
+    function_range: &core::ops::Range<usize>,
 ) -> Result<(), VerifierError> {
     let insn = ebpf::get_insn(prog, insn_ptr);
 

@@ -10,7 +10,8 @@ use solana_rbpf::{
     verifier::RequisiteVerifier,
     vm::{Config, DynamicAnalysis, EbpfVm, TestContextObject},
 };
-use std::{fs::File, io::Read, path::Path, sync::Arc};
+use std::{fs::File, io::Read, path::Path};
+use alloc::sync::Arc;
 
 fn main() {
     let matches = App::new("Solana BPF CLI")

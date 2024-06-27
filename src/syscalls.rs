@@ -21,13 +21,41 @@
 //! value. Hence some syscalls have unused arguments, or return a 0 value in all cases, in order to
 //! respect this convention.
 
-use crate::{
-    declare_builtin_function,
-    error::EbpfError,
-    memory_region::{AccessType, MemoryMapping},
-    vm::TestContextObject,
-};
-use std::{slice::from_raw_parts, str::from_utf8};
+use alloc::boxed::Box;
+use alloc::format;
+use alloc::string::String;
+use crate::{declare_builtin_function, error::EbpfError, memory_region::{AccessType, MemoryMapping}, syscalls, vm::TestContextObject};
+use core::{fmt, slice::from_raw_parts, str::from_utf8};
+use combine::lib::println;
+use crate::error::MyError as MyBaseError;
+
+#[derive(Debug)]
+pub struct MyError {
+    description: String,
+}
+
+impl MyError {
+    pub fn new(description: impl Into<String>) -> MyError {
+        MyError {
+            description: description.into(),
+        }
+    }
+}
+
+impl fmt::Display for MyError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.description)
+    }
+}
+
+impl MyBaseError for MyError {}
+
+impl From<EbpfError> for Box<MyError> {
+    fn from(error: EbpfError) -> Self {
+        let description = format!("{:?}", error);
+        Box::new(MyError::new(description))
+    }
+}
 
 declare_builtin_function!(
     /// Prints its **last three** arguments to standard output. The **first two** arguments are
@@ -41,7 +69,7 @@ declare_builtin_function!(
         arg4: u64,
         arg5: u64,
         _memory_mapping: &mut MemoryMapping,
-    ) -> Result<u64, Box<dyn std::error::Error>> {
+    ) -> Result<u64, Box<MyError>> {
         println!("bpf_trace_printf: {arg3:#x}, {arg4:#x}, {arg5:#x}");
         let size_arg = |x| {
             if x == 0 {
@@ -69,7 +97,7 @@ declare_builtin_function!(
         arg4: u64,
         arg5: u64,
         _memory_mapping: &mut MemoryMapping,
-    ) -> Result<u64, Box<dyn std::error::Error>> {
+    ) -> Result<u64, Box<MyError>> {
         Ok(arg1.wrapping_shl(32)
             | arg2.wrapping_shl(24)
             | arg3.wrapping_shl(16)
@@ -91,7 +119,7 @@ declare_builtin_function!(
         _arg4: u64,
         _arg5: u64,
         memory_mapping: &mut MemoryMapping,
-    ) -> Result<u64, Box<dyn std::error::Error>> {
+    ) -> Result<u64, Box<MyError>> {
         let host_addr: Result<u64, EbpfError> =
             memory_mapping.map(AccessType::Store, vm_addr, len).into();
         let host_addr = host_addr?;
@@ -116,7 +144,7 @@ declare_builtin_function!(
         _arg4: u64,
         _arg5: u64,
         memory_mapping: &mut MemoryMapping,
-    ) -> Result<u64, Box<dyn std::error::Error>> {
+    ) -> Result<u64, Box<MyError>> {
         // C-like strcmp, maybe shorter than converting the bytes to string and comparing?
         if arg1 == 0 || arg2 == 0 {
             return Ok(u64::MAX);
@@ -154,7 +182,7 @@ declare_builtin_function!(
         _arg4: u64,
         _arg5: u64,
         memory_mapping: &mut MemoryMapping,
-    ) -> Result<u64, Box<dyn std::error::Error>> {
+    ) -> Result<u64, Box<MyError>> {
         let host_addr: Result<u64, EbpfError> =
             memory_mapping.map(AccessType::Load, vm_addr, len).into();
         let host_addr = host_addr?;
@@ -179,7 +207,7 @@ declare_builtin_function!(
         arg4: u64,
         arg5: u64,
         memory_mapping: &mut MemoryMapping,
-    ) -> Result<u64, Box<dyn std::error::Error>> {
+    ) -> Result<u64, Box<MyError>> {
         println!(
             "dump_64: {:#x}, {:#x}, {:#x}, {:#x}, {:#x}, {:?}",
             arg1, arg2, arg3, arg4, arg5, memory_mapping as *const _

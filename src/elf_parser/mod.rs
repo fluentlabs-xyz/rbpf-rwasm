@@ -3,7 +3,11 @@
 pub mod consts;
 pub mod types;
 
-use std::{fmt, mem, ops::Range, slice};
+use alloc::str;
+use alloc::string::{String, ToString};
+use core::{ops::Range, slice};
+use core::{fmt, mem};
+use core::fmt::{Debug, Display};
 
 use crate::{ArithmeticOverflow, ErrCheckedArithmetic};
 use {consts::*, types::*};
@@ -12,55 +16,116 @@ use {consts::*, types::*};
 pub const SECTION_NAME_LENGTH_MAXIMUM: usize = 16;
 const SYMBOL_NAME_LENGTH_MAXIMUM: usize = 64;
 
+#[derive(PartialEq, Eq)]
+pub struct ElfError {}
+
+impl Debug for ElfError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "ElfError")
+    }
+}
+
+impl Display for ElfError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "ElfError occurred")
+    }
+}
+}
+
 /// Error definitions
-#[derive(Debug, PartialEq, Eq, thiserror::Error)]
+#[derive(PartialEq, Eq)]
 pub enum ElfParserError {
     /// ELF file header is inconsistent or unsupported
-    #[error("invalid file header")]
+    // #[error("invalid file header")]
     InvalidFileHeader,
     /// Program header is inconsistent or unsupported
-    #[error("invalid program header")]
+    // #[error("invalid program header")]
     InvalidProgramHeader,
     /// Section header is inconsistent or unsupported
-    #[error("invalid section header")]
+    // #[error("invalid section header")]
     InvalidSectionHeader,
     /// Section or symbol name is not UTF8 or too long
-    #[error("invalid string")]
+    // #[error("invalid string")]
     InvalidString,
     /// Section or symbol name is too long
-    #[error("Section or symbol name `{0}` is longer than `{1}` bytes")]
+    // #[error("Section or symbol name `{0}` is longer than `{1}` bytes")]
     StringTooLong(String, usize),
     /// An index or memory range does exeed its boundaries
-    #[error("value out of bounds")]
+    // #[error("value out of bounds")]
     OutOfBounds,
     /// The size isn't valid
-    #[error("invalid size")]
+    // #[error("invalid size")]
     InvalidSize,
     /// Headers, tables or sections do overlap in the file
-    #[error("values overlap")]
+    // #[error("values overlap")]
     Overlap,
     /// Sections are not sorted in ascending order
-    #[error("sections not in ascending order")]
+    // #[error("sections not in ascending order")]
     SectionNotInOrder,
     /// No section name string table present in the file
-    #[error("no section name string table found")]
+    // #[error("no section name string table found")]
     NoSectionNameStringTable,
     /// Invalid .dynamic section table
-    #[error("invalid dynamic section table")]
+    // #[error("invalid dynamic section table")]
     InvalidDynamicSectionTable,
     /// Invalid relocation table
-    #[error("invalid relocation table")]
+    // #[error("invalid relocation table")]
     InvalidRelocationTable,
     /// Invalid alignment
-    #[error("invalid alignment")]
+    // #[error("invalid alignment")]
     InvalidAlignment,
     /// No string table
-    #[error("no string table")]
+    // #[error("no string table")]
     NoStringTable,
     /// No dynamic string table
-    #[error("no dynamic string table")]
+    // #[error("no dynamic string table")]
     NoDynamicStringTable,
 }
+
+impl fmt::Debug for ElfParserError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ElfParserError::InvalidFileHeader => write!(f, "InvalidFileHeader"),
+            ElfParserError::InvalidProgramHeader => write!(f, "InvalidProgramHeader"),
+            ElfParserError::InvalidSectionHeader => write!(f, "InvalidSectionHeader"),
+            ElfParserError::InvalidString => write!(f, "InvalidString"),
+            ElfParserError::StringTooLong(name, length) => f.debug_tuple("StringTooLong").field(name).field(length).finish(),
+            ElfParserError::OutOfBounds => write!(f, "OutOfBounds"),
+            ElfParserError::InvalidSize => write!(f, "InvalidSize"),
+            ElfParserError::Overlap => write!(f, "Overlap"),
+            ElfParserError::SectionNotInOrder => write!(f, "SectionNotInOrder"),
+            ElfParserError::NoSectionNameStringTable => write!(f, "NoSectionNameStringTable"),
+            ElfParserError::InvalidDynamicSectionTable => write!(f, "InvalidDynamicSectionTable"),
+            ElfParserError::InvalidRelocationTable => write!(f, "InvalidRelocationTable"),
+            ElfParserError::InvalidAlignment => write!(f, "InvalidAlignment"),
+            ElfParserError::NoStringTable => write!(f, "NoStringTable"),
+            ElfParserError::NoDynamicStringTable => write!(f, "NoDynamicStringTable"),
+        }
+    }
+}
+
+impl fmt::Display for ElfParserError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ElfParserError::InvalidFileHeader => write!(f, "invalid file header"),
+            ElfParserError::InvalidProgramHeader => write!(f, "invalid program header"),
+            ElfParserError::InvalidSectionHeader => write!(f, "invalid section header"),
+            ElfParserError::InvalidString => write!(f, "invalid string"),
+            ElfParserError::StringTooLong(name, length) => write!(f, "Section or symbol name `{}` is longer than `{}` bytes", name, length),
+            ElfParserError::OutOfBounds => write!(f, "value out of bounds"),
+            ElfParserError::InvalidSize => write!(f, "invalid size"),
+            ElfParserError::Overlap => write!(f, "values overlap"),
+            ElfParserError::SectionNotInOrder => write!(f, "sections not in ascending order"),
+            ElfParserError::NoSectionNameStringTable => write!(f, "no section name string table found"),
+            ElfParserError::InvalidDynamicSectionTable => write!(f, "invalid dynamic section table"),
+            ElfParserError::InvalidRelocationTable => write!(f, "invalid relocation table"),
+            ElfParserError::InvalidAlignment => write!(f, "invalid alignment"),
+            ElfParserError::NoStringTable => write!(f, "no string table"),
+            ElfParserError::NoDynamicStringTable => write!(f, "no dynamic string table"),
+        }
+    }
+}
+
 
 fn check_that_there_is_no_overlap(
     range_a: &Range<usize>,
@@ -519,7 +584,7 @@ impl<'a> fmt::Debug for Elf64<'a> {
                     SECTION_NAME_LENGTH_MAXIMUM,
                 )
                 .and_then(|name| {
-                    std::str::from_utf8(name).map_err(|_| ElfParserError::InvalidString)
+                    str::from_utf8(name).map_err(|_| ElfParserError::InvalidString)
                 })
                 .unwrap();
             writeln!(f, "{section_name}")?;
@@ -537,7 +602,7 @@ impl<'a> fmt::Debug for Elf64<'a> {
                             SYMBOL_NAME_LENGTH_MAXIMUM,
                         )
                         .and_then(|name| {
-                            std::str::from_utf8(name).map_err(|_| ElfParserError::InvalidString)
+                            str::from_utf8(name).map_err(|_| ElfParserError::InvalidString)
                         })
                         .unwrap();
                     writeln!(f, "{symbol_name}")?;

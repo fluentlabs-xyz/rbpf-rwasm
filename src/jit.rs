@@ -10,8 +10,11 @@
 // the MIT license <http://opensource.org/licenses/MIT>, at your option. This file may not be
 // copied, modified, or distributed except according to those terms.
 
+use alloc::vec;
+use alloc::vec::Vec;
 use rand::{rngs::SmallRng, Rng, SeedableRng};
-use std::{fmt::Debug, mem, ptr};
+use core::{fmt::Debug, mem, ptr};
+use combine::lib::println;
 
 use crate::{
     ebpf::{self, FIRST_SCRATCH_REG, FRAME_PTR_REG, INSN_SIZE, SCRATCH_REGS, STACK_PTR_REG},
@@ -48,8 +51,8 @@ impl JitProgram {
             let raw = allocate_pages(pc_loc_table_size + over_allocated_code_size)?;
             Ok(Self {
                 page_size,
-                pc_section: std::slice::from_raw_parts_mut(raw.cast::<usize>(), pc),
-                text_section: std::slice::from_raw_parts_mut(
+                pc_section: core::slice::from_raw_parts_mut(raw.cast::<usize>(), pc),
+                text_section: core::slice::from_raw_parts_mut(
                     raw.add(pc_loc_table_size),
                     over_allocated_code_size,
                 ),
@@ -67,7 +70,7 @@ impl JitProgram {
         let code_size = round_to_page_size(text_section_usage, self.page_size);
         unsafe {
             // Fill with debugger traps
-            std::ptr::write_bytes(
+            core::ptr::write_bytes(
                 raw.add(pc_loc_table_size).add(text_section_usage),
                 0xcc,
                 code_size - text_section_usage,
@@ -79,7 +82,7 @@ impl JitProgram {
                 )?;
             }
             self.text_section =
-                std::slice::from_raw_parts_mut(raw.add(pc_loc_table_size), text_section_usage);
+                core::slice::from_raw_parts_mut(raw.add(pc_loc_table_size), text_section_usage);
             protect_pages(
                 self.pc_section.as_mut_ptr().cast::<u8>(),
                 pc_loc_table_size,
@@ -97,7 +100,7 @@ impl JitProgram {
         registers: [u64; 12],
     ) {
         unsafe {
-            std::arch::asm!(
+            core::arch::asm!(
                 // RBP and RBX must be saved and restored manually in the current version of rustc and llvm.
                 "push rbx",
                 "push rbp",
@@ -120,7 +123,7 @@ impl JitProgram {
                 "pop rbp",
                 "pop rbx",
                 host_stack_pointer = in(reg) &mut vm.host_stack_pointer,
-                inlateout("rdi") std::ptr::addr_of_mut!(*vm).cast::<u64>().offset(get_runtime_environment_key() as isize) => _,
+                inlateout("rdi") core::ptr::addr_of_mut!(*vm).cast::<u64>().offset(get_runtime_environment_key() as isize) => _,
                 inlateout("rax") (vm.previous_instruction_meter as i64).wrapping_add(registers[11] as i64) => _,
                 inlateout("r10") self.pc_section[registers[11] as usize] => _,
                 inlateout("r11") &registers => _,
@@ -158,14 +161,14 @@ impl Drop for JitProgram {
 }
 
 impl Debug for JitProgram {
-    fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, fmt: &mut alloc::fmt::Formatter<'_>) -> alloc::fmt::Result {
         fmt.write_fmt(format_args!("JitProgram {:?}", self as *const _))
     }
 }
 
 impl PartialEq for JitProgram {
     fn eq(&self, other: &Self) -> bool {
-        std::ptr::eq(self as *const _, other as *const _)
+        core::ptr::eq(self as *const _, other as *const _)
     }
 }
 
@@ -357,7 +360,7 @@ impl<'a, C: ContextObject> JitCompiler<'a, C> {
         Ok(Self {
             result: JitProgram::new(pc, code_length_estimate)?,
             text_section_jumps: vec![],
-            anchors: [std::ptr::null(); ANCHOR_COUNT],
+            anchors: [core::ptr::null(); ANCHOR_COUNT],
             offset_in_text_section: 0,
             executable,
             program_vm_addr,
@@ -1284,11 +1287,11 @@ impl<'a, C: ContextObject> JitCompiler<'a, C> {
     }
 
     fn emit_set_exception_kind(&mut self, err: EbpfError) {
-        let err_kind = unsafe { *std::ptr::addr_of!(err).cast::<u64>() };
+        let err_kind = unsafe { *core::ptr::addr_of!(err).cast::<u64>() };
         let err_discriminant = ProgramResult::Err(err).discriminant();
         self.emit_ins(X86Instruction::lea(OperandSize::S64, REGISTER_PTR_TO_VM, REGISTER_OTHER_SCRATCH, Some(X86IndirectAccess::Offset(self.slot_in_vm(RuntimeEnvironmentSlot::ProgramResult)))));
         self.emit_ins(X86Instruction::store_immediate(OperandSize::S64, REGISTER_OTHER_SCRATCH, X86IndirectAccess::Offset(0), err_discriminant as i64)); // result.discriminant = err_discriminant;
-        self.emit_ins(X86Instruction::store_immediate(OperandSize::S64, REGISTER_OTHER_SCRATCH, X86IndirectAccess::Offset(std::mem::size_of::<u64>() as i32), err_kind as i64)); // err.kind = err_kind;
+        self.emit_ins(X86Instruction::store_immediate(OperandSize::S64, REGISTER_OTHER_SCRATCH, X86IndirectAccess::Offset(core::mem::size_of::<u64>() as i32), err_kind as i64)); // err.kind = err_kind;
     }
 
     fn emit_result_is_err(&mut self, destination: u8) {
@@ -1353,14 +1356,14 @@ impl<'a, C: ContextObject> JitCompiler<'a, C> {
 
         // Epilogue for errors
         self.set_anchor(ANCHOR_THROW_EXCEPTION_UNCHECKED);
-        self.emit_ins(X86Instruction::store(OperandSize::S64, REGISTER_SCRATCH, REGISTER_PTR_TO_VM, X86IndirectAccess::Offset(self.slot_in_vm(RuntimeEnvironmentSlot::Registers) + 11 * std::mem::size_of::<u64>() as i32))); // registers[11] = pc;
+        self.emit_ins(X86Instruction::store(OperandSize::S64, REGISTER_SCRATCH, REGISTER_PTR_TO_VM, X86IndirectAccess::Offset(self.slot_in_vm(RuntimeEnvironmentSlot::Registers) + 11 * core::mem::size_of::<u64>() as i32))); // registers[11] = pc;
         self.emit_ins(X86Instruction::jump_immediate(self.relative_to_anchor(ANCHOR_EPILOGUE, 5)));
 
         // Quit gracefully
         self.set_anchor(ANCHOR_EXIT);
         self.emit_validate_instruction_count(false, None);
         self.emit_ins(X86Instruction::lea(OperandSize::S64, REGISTER_PTR_TO_VM, REGISTER_OTHER_SCRATCH, Some(X86IndirectAccess::Offset(self.slot_in_vm(RuntimeEnvironmentSlot::ProgramResult)))));
-        self.emit_ins(X86Instruction::store(OperandSize::S64, REGISTER_MAP[0], REGISTER_OTHER_SCRATCH, X86IndirectAccess::Offset(std::mem::size_of::<u64>() as i32))); // result.return_value = R0;
+        self.emit_ins(X86Instruction::store(OperandSize::S64, REGISTER_MAP[0], REGISTER_OTHER_SCRATCH, X86IndirectAccess::Offset(core::mem::size_of::<u64>() as i32))); // result.return_value = R0;
         self.emit_ins(X86Instruction::load_immediate(OperandSize::S64, REGISTER_MAP[0], 0));
         self.emit_ins(X86Instruction::jump_immediate(self.relative_to_anchor(ANCHOR_EPILOGUE, 5)));
 
@@ -1539,7 +1542,7 @@ impl<'a, C: ContextObject> JitCompiler<'a, C> {
             self.emit_ins(X86Instruction::conditional_jump_immediate(0x85, self.relative_to_anchor(ANCHOR_THROW_EXCEPTION, 6)));
 
             // unwrap() the result into REGISTER_SCRATCH
-            self.emit_ins(X86Instruction::load(OperandSize::S64, REGISTER_PTR_TO_VM, REGISTER_SCRATCH, X86IndirectAccess::Offset(self.slot_in_vm(RuntimeEnvironmentSlot::ProgramResult) + std::mem::size_of::<u64>() as i32)));
+            self.emit_ins(X86Instruction::load(OperandSize::S64, REGISTER_PTR_TO_VM, REGISTER_SCRATCH, X86IndirectAccess::Offset(self.slot_in_vm(RuntimeEnvironmentSlot::ProgramResult) + core::mem::size_of::<u64>() as i32)));
 
             self.emit_ins(X86Instruction::return_near());
         }

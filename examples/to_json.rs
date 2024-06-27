@@ -17,7 +17,7 @@ use solana_rbpf::{
     static_analysis::Analysis,
     vm::TestContextObject,
 };
-use std::sync::Arc;
+use alloc::sync::Arc;
 // Turn a program into a JSON string.
 //
 // Relies on `json` crate.
