@@ -28,9 +28,11 @@ macro_rules! disasm {
         );
         let executable = assemble::<TestContextObject>(src, Arc::new(loader)).unwrap();
         let analysis = Analysis::from_executable(&executable).unwrap();
-        let mut reasm = Vec::new();
+        // let mut reasm = Vec::new();
+        let mut reasm = String::new();
         analysis.disassemble(&mut reasm).unwrap();
-        assert_eq!(src, String::from_utf8(reasm).unwrap());
+        // assert_eq!(src, String::from_utf8(reasm).unwrap());
+        assert_eq!(src, String::from_utf8(reasm.into_bytes()).unwrap());
     }};
 }
 

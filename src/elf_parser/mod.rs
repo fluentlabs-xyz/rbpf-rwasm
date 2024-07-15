@@ -30,7 +30,6 @@ impl Display for ElfError {
         write!(f, "ElfError occurred")
     }
 }
-}
 
 /// Error definitions
 #[derive(PartialEq, Eq)]

@@ -9,6 +9,7 @@ extern crate json;
 
 extern crate elf;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 extern crate solana_rbpf;
 use solana_rbpf::{
@@ -18,6 +19,7 @@ use solana_rbpf::{
     vm::TestContextObject,
 };
 use alloc::sync::Arc;
+
 // Turn a program into a JSON string.
 //
 // Relies on `json` crate.

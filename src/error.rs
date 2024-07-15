@@ -337,12 +337,6 @@ mod tests {
         let err = ProgramResult::Err(EbpfError::JitNotCompiled);
         assert_eq!(err.discriminant(), 1);
     }
-}
-
-
-
-#[cfg(test)]
-mod tests {
     use super::*;
 
     #[test]
