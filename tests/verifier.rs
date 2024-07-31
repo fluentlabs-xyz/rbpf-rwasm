@@ -30,9 +30,10 @@ use solana_rbpf::{
     verifier::{RequisiteVerifier, Verifier, VerifierError},
     vm::{Config, TestContextObject},
 };
-use alloc::sync::Arc;
+// use alloc::sync::Arc;
 use test_utils::{assert_error, create_vm};
 use thiserror::Error;
+use std::sync::Arc;
 
 /// Error definitions
 #[derive(Debug, Error)]

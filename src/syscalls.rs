@@ -24,7 +24,7 @@
 use alloc::boxed::Box;
 use alloc::format;
 use alloc::string::String;
-use crate::{declare_builtin_function, error::EbpfError, memory_region::{AccessType, MemoryMapping}, syscalls, vm::TestContextObject};
+use crate::{declare_builtin_function, error::EbpfError, memory_region::{AccessType, MemoryMapping}, vm::TestContextObject};
 use core::{fmt, slice::from_raw_parts, str::from_utf8};
 use combine::lib::println;
 use crate::error::MyError as MyBaseError;

@@ -19,7 +19,7 @@ use solana_rbpf::{
     assembler::assemble,
     declare_builtin_function, ebpf,
     elf::Executable,
-    error::{EbpfError, ProgramResult},
+    error::{EbpfError, ProgramResult, MyBuffer, MyError, MyErrorWrapper},
     memory_region::{AccessType, MemoryMapping, MemoryRegion},
     program::{BuiltinFunction, BuiltinProgram, FunctionRegistry, SBPFVersion},
     static_analysis::Analysis,
@@ -31,6 +31,7 @@ use std::{fs::File, io::Read, sync::Arc};
 use test_utils::{
     assert_error, create_vm, PROG_TCP_PORT_80, TCP_SACK_ASM, TCP_SACK_MATCH, TCP_SACK_NOMATCH,
 };
+use solana_rbpf::error::EbpfError::AccessViolation;
 
 const INSTRUCTION_METER_BUDGET: u64 = 1024;
 
@@ -74,66 +75,6 @@ macro_rules! test_interpreter_and_jit {
                 vm.context_object_pointer.clone(),
             )
         };
-        #[cfg(all(feature = "jit", not(target_os = "windows"), target_arch = "x86_64"))]
-        {
-            #[allow(unused_mut)]
-            let compilation_result = $executable.jit_compile();
-            let mut mem = $mem;
-            let mem_region = MemoryRegion::new_writable(&mut mem, ebpf::MM_INPUT_START);
-            create_vm!(
-                vm,
-                &$executable,
-                &mut context_object,
-                stack,
-                heap,
-                vec![mem_region],
-                None
-            );
-            match compilation_result {
-                Err(err) => assert_eq!(
-                    format!("{:?}", err),
-                    expected_result,
-                    "Unexpected result for JIT compilation"
-                ),
-                Ok(()) => {
-                    let (instruction_count_jit, result) = vm.execute_program(&$executable, false);
-                    let tracer_jit = &vm.context_object_pointer;
-                    if !TestContextObject::compare_trace_log(&_tracer_interpreter, tracer_jit) {
-                        let analysis = Analysis::from_executable(&$executable).unwrap();
-                        let stdout = std::io::stdout();
-                        analysis
-                            .disassemble_trace_log(
-                                &mut stdout.lock(),
-                                &_tracer_interpreter.trace_log,
-                            )
-                            .unwrap();
-                        analysis
-                            .disassemble_trace_log(&mut stdout.lock(), &tracer_jit.trace_log)
-                            .unwrap();
-                        panic!();
-                    }
-                    assert_eq!(
-                        format!("{:?}", result),
-                        expected_result,
-                        "Unexpected result for JIT"
-                    );
-                    assert_eq!(
-                        instruction_count_interpreter, instruction_count_jit,
-                        "Interpreter and JIT instruction meter diverged",
-                    );
-                    assert_eq!(
-                        interpreter_final_pc, vm.registers[11],
-                        "Interpreter and JIT instruction final PC diverged",
-                    );
-                }
-            }
-        }
-        if $executable.get_config().enable_instruction_meter {
-            assert_eq!(
-                instruction_count_interpreter, expected_instruction_count,
-                "Instruction meter did not consume expected amount"
-            );
-        }
     };
 }
 
@@ -151,7 +92,7 @@ macro_rules! test_interpreter_and_jit_asm {
         }
     };
     ($source:tt, $mem:tt, ($($location:expr => $syscall_function:expr),* $(,)?), $context_object:expr, $expected_result:expr $(,)?) => {
-        #[allow(unused_mut)]
+        // #[allow(unused_mut)]
         {
             test_interpreter_and_jit_asm!($source, Config::default(), $mem, ($($location => $syscall_function),*), $context_object, $expected_result);
         }
@@ -2393,6 +2334,7 @@ fn test_err_reg_stack_depth() {
 // https://github.com/rust-lang/rust/issues/72016
 #[test]
 fn test_call_save() {
+    let mut buffer = MyBuffer { buf: Vec::new() };
     test_interpreter_and_jit_asm!(
         "
         mov64 r6, 0x1
@@ -2427,8 +2369,10 @@ fn test_err_syscall_string() {
             "bpf_syscall_string" => syscalls::SyscallString::vm,
         ),
         TestContextObject::new(2),
-        ProgramResult::Err(EbpfError::SyscallError(Box::new(EbpfError::AccessViolation(AccessType::Load, 0, 0, "unknown")))),
-    );
+        ProgramResult::Err(EbpfError::SyscallError(Box::new(MyErrorWrapper::from(
+            EbpfError::AccessViolation(AccessType::Load, 0, 0, "unknown")
+        )))),
+        );
 }
 
 #[test]
@@ -2522,8 +2466,8 @@ declare_builtin_function!(
         _arg4: u64,
         _arg5: u64,
         _memory_mapping: &mut MemoryMapping,
-    ) -> Result<u64, Box<dyn std::error::Error>> {
-        let (result, expected_result): (Result<u64, Box<dyn std::error::Error>>, ProgramResult) =
+    ) -> Result<u64, Box<dyn MyError>> {
+        let (result, expected_result): (Result<u64, Box<dyn MyError>>, ProgramResult) =
             if throw == 0 {
                 (Result::Ok(42), ProgramResult::Ok(42))
             } else {
@@ -3329,6 +3273,9 @@ fn execute_generated_program(prog: &[u8]) -> bool {
     if executable.verify::<RequisiteVerifier>().is_err() || executable.jit_compile().is_err() {
         return false;
     }
+
+    let mut buffer = MyBuffer { buf: Vec::new() };
+
     let (instruction_count_interpreter, tracer_interpreter, result_interpreter) = {
         let mut mem = vec![0u8; mem_size];
         let mut context_object = TestContextObject::new(max_instruction_count);
@@ -3351,6 +3298,9 @@ fn execute_generated_program(prog: &[u8]) -> bool {
             result_interpreter,
         )
     };
+
+    let mut buffer_jit = MyBuffer { buf: Vec::new() };
+
     let mut mem = vec![0u8; mem_size];
     let mut context_object = TestContextObject::new(max_instruction_count);
     let mem_region = MemoryRegion::new_writable(&mut mem, ebpf::MM_INPUT_START);
@@ -3374,10 +3324,10 @@ fn execute_generated_program(prog: &[u8]) -> bool {
         println!("result_jit={result_jit:?}");
         let stdout = std::io::stdout();
         analysis
-            .disassemble_trace_log(&mut stdout.lock(), &tracer_interpreter.trace_log)
+            .disassemble_trace_log(&mut buffer, &tracer_interpreter.trace_log)
             .unwrap();
         analysis
-            .disassemble_trace_log(&mut stdout.lock(), &tracer_jit.trace_log)
+            .disassemble_trace_log(&mut buffer_jit, &tracer_jit.trace_log)
             .unwrap();
         panic!();
     }

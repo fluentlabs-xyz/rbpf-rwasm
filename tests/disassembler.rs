@@ -12,6 +12,7 @@ use solana_rbpf::{
     program::{BuiltinProgram, FunctionRegistry},
     static_analysis::Analysis,
     vm::{Config, TestContextObject},
+    error::MyBuffer,
 };
 use std::sync::Arc;
 
@@ -28,11 +29,10 @@ macro_rules! disasm {
         );
         let executable = assemble::<TestContextObject>(src, Arc::new(loader)).unwrap();
         let analysis = Analysis::from_executable(&executable).unwrap();
-        // let mut reasm = Vec::new();
-        let mut reasm = String::new();
+        let mut reasm = MyBuffer { buf: Vec::new() };
         analysis.disassemble(&mut reasm).unwrap();
         // assert_eq!(src, String::from_utf8(reasm).unwrap());
-        assert_eq!(src, String::from_utf8(reasm.into_bytes()).unwrap());
+        assert_eq!(src, String::from_utf8(reasm.buf).unwrap());
     }};
 }
 

@@ -10,7 +10,6 @@ use alloc::boxed::Box;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use core::fmt::{Debug, Display};
-use core::fmt::Write as FmtWrite;
 use {
     crate::{elf::ElfError, memory_region::AccessType, verifier::VerifierError},
     core::fmt,
@@ -35,6 +34,35 @@ impl fmt::Display for MemoryError {
 pub trait MyError: Debug + Display {
     fn source(&self) -> Option<&(dyn MyError + 'static)> {
         None
+    }
+}
+
+
+pub struct MyErrorWrapper {
+    pub inner: Box<dyn MyError>,
+}
+
+impl fmt::Debug for MyErrorWrapper {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(&self.inner, f)
+    }
+}
+
+impl fmt::Display for MyErrorWrapper {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.inner)
+    }
+}
+
+impl MyError for MyErrorWrapper {
+
+}
+
+impl From<EbpfError> for MyErrorWrapper {
+    fn from(error: EbpfError) -> Self {
+        MyErrorWrapper {
+            inner: Box::new(error)
+        }
     }
 }
 
@@ -148,11 +176,20 @@ impl From<fmt::Error> for Box<dyn MyError> {
     }
 }
 
-impl<T: FmtWrite> MyWrite for T {
+pub struct MyBuffer {
+    pub buf: Vec<u8>,
+}
+
+impl fmt::Write for MyBuffer {
+    fn write_str(&mut self, s: &str) -> fmt::Result {
+        self.buf.extend_from_slice(s.as_bytes());
+        Ok(())
+    }
+}
+
+impl MyWrite for MyBuffer {
     fn write(&mut self, buf: &[u8]) -> Result<usize, CustomError> {
-        for &byte in buf {
-            self.write_char(byte as char).map_err(|_| CustomError::new("write error"))?;
-        }
+        self.buf.extend_from_slice(buf);
         Ok(buf.len())
     }
 
@@ -230,6 +267,46 @@ pub enum EbpfError {
 impl From<ElfError> for EbpfError {
     fn from(error: ElfError) -> Self {
         EbpfError::ElfError(error)
+    }
+}
+
+impl fmt::Display for EbpfError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            EbpfError::ElfError(err) => write!(f, "ELF error: {}", err),
+            EbpfError::FunctionAlreadyRegistered(index) => write!(f, "Function #{} was already registered", index),
+            EbpfError::CallDepthExceeded => write!(f, "Exceeded max BPF to BPF call depth"),
+            EbpfError::ExitRootCallFrame => write!(f, "Attempted to exit root call frame"),
+            EbpfError::DivideByZero => write!(f, "Divide by zero at BPF instruction"),
+            EbpfError::DivideOverflow => write!(f, "Division overflow at BPF instruction"),
+            EbpfError::ExecutionOverrun => write!(f, "Attempted to execute past the end of the text segment at BPF instruction"),
+            EbpfError::CallOutsideTextSegment => write!(f, "CallX attempted to call outside of the text segment"),
+            EbpfError::ExceededMaxInstructions => write!(f, "Exceeded CUs meter at BPF instruction"),
+            EbpfError::JitNotCompiled => write!(f, "Program has not been JIT-compiled"),
+            EbpfError::InvalidVirtualAddress(address) => write!(f, "Invalid virtual address {:#x}", address),
+            EbpfError::InvalidMemoryRegion(index) => write!(f, "Invalid memory region at index {}", index),
+            EbpfError::AccessViolation(access_type, address, size, section) => write!(f, "Access violation in {} section at address {:#x} of size {}", section, address, size),
+            EbpfError::StackAccessViolation(access_type, address, size, frame) => write!(f, "Access violation in stack frame {} at address {:#x} of size {}", frame, address, size),
+            EbpfError::InvalidInstruction => write!(f, "Invalid BPF instruction"),
+            EbpfError::UnsupportedInstruction => write!(f, "Unsupported BPF instruction"),
+            EbpfError::ExhaustedTextSegment(instr) => write!(f, "Compilation exhausted text segment at BPF instruction {}", instr),
+            EbpfError::LibcInvocationFailed(func, args, err_code) => {
+                let args_joined = args.join(", ");
+                write!(f, "Libc calling {}({}) returned error code {}", func, args_joined, err_code)
+            },
+            EbpfError::VerifierError(err) => write!(f, "Verifier error: {}", err),
+            EbpfError::SyscallError(boxed_err) => write!(f, "Syscall error: {}", boxed_err),
+        }
+    }
+}
+
+
+impl MyError for EbpfError {
+    fn source(&self) -> Option<&(dyn MyError + 'static)> {
+        match self {
+            EbpfError::SyscallError(ref err) => Some(err.as_ref()),
+            _ => None,
+        }
     }
 }
 

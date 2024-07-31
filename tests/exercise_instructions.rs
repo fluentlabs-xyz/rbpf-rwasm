@@ -21,6 +21,7 @@ use solana_rbpf::{
     static_analysis::Analysis,
     verifier::RequisiteVerifier,
     vm::{Config, ContextObject, TestContextObject},
+    error::MyBuffer,
 };
 use std::sync::Arc;
 use test_utils::create_vm;
@@ -36,6 +37,7 @@ macro_rules! test_interpreter_and_jit {
         #[allow(unused_mut)]
         let mut context_object = $context_object;
         $executable.verify::<RequisiteVerifier>().unwrap();
+        let mut trace_buffer = MyBuffer { buf: Vec::new() }; // Создаем MyBuffer для трассировки
         let (
             instruction_count_interpreter,
             interpreter_final_pc,
@@ -83,12 +85,11 @@ macro_rules! test_interpreter_and_jit {
             let tracer_jit = &vm.context_object_pointer;
             if !TestContextObject::compare_trace_log(&_tracer_interpreter, tracer_jit) {
                 let analysis = Analysis::from_executable(&$executable).unwrap();
-                let stdout = std::io::stdout();
                 analysis
-                    .disassemble_trace_log(&mut stdout.lock(), &_tracer_interpreter.trace_log)
+                    .disassemble_trace_log(&mut trace_buffer, &_tracer_interpreter.trace_log)
                     .unwrap();
                 analysis
-                    .disassemble_trace_log(&mut stdout.lock(), &tracer_jit.trace_log)
+                    .disassemble_trace_log(&mut trace_buffer, &tracer_jit.trace_log)
                     .unwrap();
                 panic!();
             }
